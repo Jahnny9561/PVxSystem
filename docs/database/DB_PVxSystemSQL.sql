@@ -1,6 +1,6 @@
 CREATE TABLE `site` (
   `site_id` int PRIMARY KEY AUTO_INCREMENT,
-  `name` varchar1,
+  `name` varchar(255),
   `location` varchar(255),
   `capacity_kw` decimal,
   `timezone` varchar(255)
@@ -121,10 +121,6 @@ ALTER TABLE `event_log` ADD FOREIGN KEY (`device_id`) REFERENCES `device` (`devi
 ALTER TABLE `control_command` ADD FOREIGN KEY (`device_id`) REFERENCES `device` (`device_id`);
 
 ALTER TABLE `control_command` ADD FOREIGN KEY (`user_id`) REFERENCES `user_account` (`user_id`);
-
-ALTER TABLE `user_site` ADD FOREIGN KEY (`user_id`) REFERENCES `user_account` (`user_id`);
-
-ALTER TABLE `user_site` ADD FOREIGN KEY (`site_id`) REFERENCES `site` (`site_id`);
 
 ALTER TABLE `sensor` ADD FOREIGN KEY (`sensor_id`) REFERENCES `device` (`reference_id`);
 
