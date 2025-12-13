@@ -1,0 +1,54 @@
+// pseudo code
+
+BOOL isSunny, isCloudy, isRainy, isDay, isNight, highLoad, lowLoad, lowBatterLevel, highBatterLevel, lowPanelPowerOutput = FALSE
+FLOAT currentTime = time.now() // get current time
+FLOAT lastUpdatedTime = 0.0
+FLOAT UpdatePeriod = 3000.0 //ms
+FLOAT lowUpdatePeriod = 10000.0 // ms
+
+WHILE(currentTime - lastUpdatedTime >= UpdatePeriod)
+	IF (isSunny AND isDay AND lowLoad AND lowBatterLevel)
+		SwitchToPV_Power(PV)
+		ChargeBatery(PV, limit)
+	END IF
+	
+	IF ((isRainy OR isCloudy) AND NOT(isNight) AND highLoad AND highBatterLevel AND lowPanelPowerOutput)
+		UseBatteryPower(PV)
+	END IF
+	
+	IF (isNight)
+		UpdatePeriod = lowUpdatePeriod
+		UpdateDataBase(UpdatePeriod, database)
+	END IF
+	
+	IF ((isRainy OR isCloudy) AND isDay AND highLoad AND lowBatterLevel AND lowPanelPowerOutput)
+		SwitchToCityPower(PV)
+	END IF
+	
+	IF (isSunny AND isDay AND highLoad AND lowBatterLevel)
+		SwitchToCityPower(PV)
+	END IF
+END WHILE
+
+FUNCTION UseBatteryPower(PV)
+PV.changePower(PV_Power)
+END FUNCTION
+
+FUNCTION ChargeBatery(PV, limit)
+PV.chargeBatery(limit)
+END FUNCTION
+
+FUNCTION SwitchToPV_Power(PV)
+// switch to PV power
+UseBatteryPower(PV)
+END FUNCTION
+
+FUNCTION SwitchToCityPower(PV)
+// switch to city power
+PV.changePower(CityPower)
+END FUNCTION	
+
+FUNCTION UpdateDataBase(period, database)
+// update my database :)
+database.update(period)
+END FUNCTION
