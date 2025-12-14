@@ -151,7 +151,7 @@ function shutdown() {
 // API: start simulation for site (writes every intervalMs)
 app.post("/sites/:id/simulate/start", async (req, res) => {
     const siteId = Number(req.params.id);
-    const intervalMs = Number(req.body.intervalMs ?? 15000);
+    const intervalMs = Number(req.body?.intervalMs ?? 15000);
 
     if (!Number.isFinite(siteId)) {
         return res.status(400).json({ error: "Invalid site id" });
