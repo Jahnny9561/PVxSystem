@@ -1,36 +1,44 @@
 # Симулация на PV данни
-Как да използваме симулацията? Прочетете текста по-долу за отговор на този въпрос.
+Несложна симулация на PV система, която генерира данни,
+за да се провери изправността на информационната система.
 
-## Първо създаваме един тест обект в MySQL, от който да симулираме събиране на данни:
+Как може да се използва симулацията? Моля, прочетете по-долу за информация.
+
+## Първо трябва да се създаде тест обект в MySQL, от който да се симулира събиране на данни:
 ```
 INSERT INTO site (name, capacity_kw, timezone)
 VALUES ('Test Site', 5.00, 'Europe/Sofia');
 SELECT * FROM site;
 ```
 
-## След това пускаме сървъра, ако не е пуснат:
+## След това се пуска сървъра, ако не е пуснат:
 ```
 npm run dev
 ```
 
-## Пускаме симулацията:
+## Пуска се симулацията:
 ```
 curl -X POST http://localhost:3000/sites/1/simulate/start -H "Content-Type: application/json" -d '{"intervalMs": 3000}'
 ```
 ### За Windows да се използва curl.exe
 
-## В MySQL използвайте командата, за да видите натрупаните данни:
+## В MySQL да се използват следните команди, за да се видят натрупаните данни:
+
+### Telemetry:
 ```
 SELECT * 
 FROM telemetry
 ORDER BY timestamp DESC;
+```
 
+### Weather data:
+```
 SELECT * 
 FROM weather_data
 ORDER BY timestamp DESC;
 ```
 
-### Може и с curl да получим данните:
+### Възможно е и с 'curl' да се получат данните:
 ```
 curl http://localhost:3000/sites/1/telemetry?limit=50
 ```
@@ -40,7 +48,7 @@ curl http://localhost:3000/sites/1/telemetry?limit=50
 curl -X POST http://localhost:3000/sites/1/simulate/stop
 ```
 
-## За получаване на данните, които да се използват за диаграмите:
+## За получаване на данни, които да се използват за диаграмите:
 ```
 curl -X POST http://localhost:3000/sites/1/simulate/seed -H "Content-Type: application/json" -d '{"points": 96}'
 ```
