@@ -67,6 +67,11 @@ curl -X POST http://localhost:3000/sites/1/simulate/stop
 curl -X POST http://localhost:3000/sites/1/simulate/seed
 ```
 
+6. **Изтриване на всички генерирани данни**
+```
+curl -X DELETE http://localhost:3000/sites/1/simulate/clear
+```
+
 ## Преглед на данните
 
 ### 1. В `MySQL`

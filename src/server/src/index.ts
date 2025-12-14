@@ -307,6 +307,38 @@ app.get("/sites/:id/telemetry", async (req, res) => {
     }));
 });
 
+// Delete all simulated data for a site
+app.delete("/sites/:id/simulate/clear", async (req, res) => {
+    const siteId = Number(req.params.id);
+    if (!Number.isFinite(siteId)) {
+        return res.status(400).json({ error: "Invalid site id" });
+    }
+
+    try {
+        // Find the virtual device for this site
+        const device = await prisma.device.findFirst({
+            where: { name: `sim-site-${siteId}` },
+        });
+
+        // Delete telemetry for the device
+        if (device) {
+            await prisma.telemetry.deleteMany({
+                where: { device_id: device.device_id },
+            });
+        }
+
+        // Delete weather data for the site
+        await prisma.weatherData.deleteMany({
+            where: { site_id: siteId },
+        });
+
+        res.json({ cleared: true, siteId });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to clear simulated data" });
+    }
+});
+
 app.get("/", (req, res) => res.send("Server is running"));
 
 const server = app.listen(PORT, () => {
