@@ -107,14 +107,17 @@ async function generateTelemetryPointForSite(siteId: number) {
 
 // API: start simulation for site (writes every intervalMs)
 app.post("/sites/:id/simulate/start", async (req, res) => {
-  const siteId = Number(req.params.id);
-  const intervalMs = Number(req.body.intervalMs ?? 15000);
+  try {
+    const siteId = Number(req.params.id);
+    const intervalMs = Number(req.body.intervalMs ?? 15000);
 
-  if (simulators.has(siteId)) return res.status(400).json({ error: "Simulation already running for this site" });
+    const site = await prisma.site.findUnique({
+      where: { site_id: siteId }
+    });
 
-  // quick validation
-  const site = await prisma.site.findUnique({ where: { site_id: siteId } });
-  if (!site) return res.status(404).json({ error: "Site not found" });
+    if (!site) {
+      return res.status(404).json({ error: "Site not found" });
+    }
 
   const timer = setInterval(async () => {
     try {
@@ -127,6 +130,11 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
 
   simulators.set(siteId, timer);
   res.json({ started: true, siteId, intervalMs });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database unavailable" });
+  }
 });
 
 app.post("/sites/:id/simulate/stop", (req, res) => {
