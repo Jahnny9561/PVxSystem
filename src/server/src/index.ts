@@ -71,7 +71,7 @@ async function generateTelemetryPointForSite(siteId: number) {
   const mtemp = moduleTemp(ambient, irradiance);
 
   const powerKw = computeACPowerKw(capKw, irradiance, -0.004, mtemp, 0.95);
-  const noisyPower = Math.max(0, powerKw + Math.random() * 0.2);
+  const noisyPowerKw = Math.max(0, powerKw + Math.random() * 0.2);
   const device = await ensureSiteDevice(siteId);
 
   const windSpeed = Math.random() * 10;
@@ -97,18 +97,18 @@ async function generateTelemetryPointForSite(siteId: number) {
       device_id: device.device_id,
       timestamp: now,
       parameter: "Power",
-      value: toDecimal(+(noisyPower.toFixed(4))),
+      value: toDecimal(+(noisyPowerKw.toFixed(4))),
       unit: "kW",
     },
   });
 
-  return { siteId, timestamp: now, irradiance, ambient, moduleTemp: mtemp, powerKw };
+  return { siteId, timestamp: now, irradiance, ambient, moduleTemp: mtemp, noisyPowerKw };
 }
 
 // API: start simulation for site (writes every intervalMs)
 app.post("/sites/:id/simulate/start", async (req, res) => {
   const siteId = Number(req.params.id);
-  const intervalMs = Number(req.body.intervalMs ?? 5000);
+  const intervalMs = Number(req.body.intervalMs ?? 15000);
 
   if (simulators.has(siteId)) return res.status(400).json({ error: "Simulation already running for this site" });
 
@@ -119,7 +119,7 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
   const timer = setInterval(async () => {
     try {
       const p = await generateTelemetryPointForSite(siteId);
-      console.log("sim:", siteId, p.timestamp.toISOString(), `${p.powerKw.toFixed(3)} kW`);
+      console.log("sim:", siteId, p.timestamp.toISOString(), `${p.noisyPowerKw.toFixed(3)} kW`);
     } catch (err) {
       console.error("sim error:", err);
     }
