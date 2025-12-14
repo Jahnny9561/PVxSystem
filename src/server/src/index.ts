@@ -14,7 +14,6 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 const simulators = new Map<number, ReturnType<typeof setInterval>>();
 
-// --- helpers (simple physical-ish model) ---
 function irradianceAtHour(hour: number, sunrise = 6, sunset = 18, gMax = 900) {
     if (hour < sunrise || hour > sunset) return 0;
     const dayLen = sunset - sunrise;
@@ -34,8 +33,7 @@ function computeACPowerKw(capacityKw: number, irradiance: number, tempCoeff = -0
     const p_dc_kw = capacityKw * gFactor * derate * tempFactor;
     const inverterEff = 0.98;
     const p_ac_kw = Math.max(0, p_dc_kw * inverterEff);
-    // clip to capacity
-    return Math.min(p_ac_kw, capacityKw);
+    return Math.min(p_ac_kw, capacityKw); // clip to capacity
 }
 
 // utility: convert number -> Prisma.Decimal safely
@@ -59,81 +57,81 @@ async function ensureSiteDevice(siteId: number) {
 }
 
 function computeSitePhysics(site: { capacity_kw: Prisma.Decimal | null }, timestamp: Date) {
-  const capKw = site.capacity_kw
-    ? Number(site.capacity_kw.toString())
-    : 1.0;
+    const capKw = site.capacity_kw
+        ? Number(site.capacity_kw.toString())
+        : 1.0;
 
-  const hour =
-    (timestamp.getHours() % 24) + timestamp.getMinutes() / 60;
+    const hour =
+        (timestamp.getHours() % 24) + timestamp.getMinutes() / 60;
 
-  const irradiance = irradianceAtHour(hour);
-  const ambient =
-    20 + 10 * Math.sin((2 * Math.PI / 24) * hour - Math.PI / 2);
-  const moduleTempC = moduleTemp(ambient, irradiance);
+    const irradiance = irradianceAtHour(hour);
+    const ambient =
+        20 + 10 * Math.sin((2 * Math.PI / 24) * hour - Math.PI / 2);
+    const moduleTempC = moduleTemp(ambient, irradiance);
 
-  const powerKw = computeACPowerKw(
-    capKw,
-    irradiance,
-    -0.004,
-    moduleTempC,
-    0.95
-  );
+    const powerKw = computeACPowerKw(
+        capKw,
+        irradiance,
+        -0.004,
+        moduleTempC,
+        0.95
+    );
 
-  const noisyPowerKw = Math.max(
-    0,
-    powerKw + Math.random() * 0.2
-  );
+    const noisyPowerKw = Math.max(
+        0,
+        powerKw + Math.random() * 0.2
+    );
 
-  const windSpeed = Math.random() * 10;
-  const windDir = Math.random() * 360;
+    const windSpeed = Math.random() * 10;
+    const windDir = Math.random() * 360;
 
-  return {
-    hour,
-    irradiance,
-    ambient,
-    moduleTempC,
-    powerKw: noisyPowerKw,
-    windSpeed,
-    windDir,
-  };
+    return {
+        hour,
+        irradiance,
+        ambient,
+        moduleTempC,
+        powerKw: noisyPowerKw,
+        windSpeed,
+        windDir,
+    };
 }
 
 // generate a single telemetry point for a site
 async function generateTelemetryPointForSite(siteId: number) {
-  const site = await prisma.site.findUnique({
-    where: { site_id: siteId },
-  });
-  if (!site) throw new Error("Site not found");
+    const site = await prisma.site.findUnique({
+        where: { site_id: siteId },
+    });
+    if (!site) throw new Error("Site not found");
 
-  const now = new Date();
-  const device = await ensureSiteDevice(siteId);
+    const now = new Date();
+    const device = await ensureSiteDevice(siteId);
 
-  const physics = computeSitePhysics(site, now);
+    const physics = computeSitePhysics(site, now);
 
-  await prisma.weatherData.create({
-    data: {
-      site_id: siteId,
-      timestamp: now,
-      irradiance_wm2: toDecimal(+physics.irradiance.toFixed(2)),
-      ambient_temp_c: toDecimal(+physics.ambient.toFixed(2)),
-      module_temp_c: toDecimal(+physics.moduleTempC.toFixed(2)),
-      wind_speed_ms: toDecimal(+physics.windSpeed.toFixed(2)),
-      wind_dir_deg: toDecimal(+physics.windDir.toFixed(2)),
-    },
-  });
+    await prisma.weatherData.create({
+        data: {
+            site_id: siteId,
+            timestamp: now,
+            irradiance_wm2: toDecimal(+physics.irradiance.toFixed(2)),
+            ambient_temp_c: toDecimal(+physics.ambient.toFixed(2)),
+            module_temp_c: toDecimal(+physics.moduleTempC.toFixed(2)),
+            wind_speed_ms: toDecimal(+physics.windSpeed.toFixed(2)),
+            wind_dir_deg: toDecimal(+physics.windDir.toFixed(2)),
+        },
+    });
 
-  await prisma.telemetry.create({
-    data: {
-      device_type: "SIMULATED_INVERTER",
-      device_id: device.device_id,
-      timestamp: now,
-      parameter: "Power",
-      value: toDecimal(+physics.powerKw.toFixed(4)),
-      unit: "kW",
-    },
-  });
+    await prisma.telemetry.create({
+        data: {
+            device_type: "SIMULATED_INVERTER",
+            device_id: device.device_id,
+            timestamp: now,
+            parameter: "Power",
+            value: toDecimal(+physics.powerKw.toFixed(4)),
+            unit: "kW",
+        },
+    });
 
-  return { siteId, timestamp: now, ...physics };
+    return { siteId, timestamp: now, ...physics };
 }
 
 function shutdown() {
@@ -148,7 +146,7 @@ function shutdown() {
     prisma.$disconnect().finally(() => process.exit(0));
 }
 
-// API: start simulation for site (writes every intervalMs)
+// Live simulation for site (writes every intervalMs)
 app.post("/sites/:id/simulate/start", async (req, res) => {
     const siteId = Number(req.params.id);
     const intervalMs = Number(req.body?.intervalMs ?? 15000);
@@ -160,8 +158,6 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
     if (simulators.has(siteId)) {
         return res.status(400).json({ error: "Simulation already running" });
     }
-
-    // reserve immediately (race-safe)
     simulators.set(siteId, null as unknown as ReturnType<typeof setInterval>);
 
     try {
@@ -226,6 +222,16 @@ app.post("/sites/:id/simulate/stop", (req, res) => {
     res.json({ stopped: true, siteId });
 });
 
+/*  
+    Seed data = pre-generated, historical telemetry and weather data
+    that already exists in the database before real-time simulation starts.
+    If points = 24, timestamps become:
+    00:00
+    01:00
+    02:00
+    ...
+    23:00
+*/
 app.post("/sites/:id/simulate/seed", async (req, res) => {
     try {
         const siteId = Number(req.params.id);
@@ -290,8 +296,8 @@ app.get("/sites/:id/telemetry", async (req, res) => {
         take: limit,
     });
     res.json(data.map(d => {
-        // convert Decimal and BigInt for JSON safety
         return {
+            // convert Decimal and BigInt for JSON format safety
             telemetry_id: d.telemetry_id.toString(), // BigInt -> string
             timestamp: d.timestamp,
             parameter: d.parameter,
@@ -308,7 +314,6 @@ const server = app.listen(PORT, () => {
 });
 
 const wss = new WebSocketServer({ server });
-
 wss.on("connection", ws => {
     console.log("WS client connected");
 });

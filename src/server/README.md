@@ -1,57 +1,92 @@
-# Симулация на PV данни
-Несложна симулация на PV система, която генерира данни,
-за да се провери изправността на информационната система.
+# Симулация на PV система
+Тази симулация генерира виртуални данни от фотоволтаична (PV) система, които могат да се използват за тестване и визуализация в информационна система. Основната цел е да се осигурят реалистични времеви стойности за мощност и метеорологични данни, без да се налага наличието на реална PV система.
 
-Как може да се използва симулацията? Моля, прочетете по-долу за информация.
+## Какво прави симулацията
 
-## Първо трябва да се създаде тест обект в MySQL, от който да се симулира събиране на данни:
+1. **Генерира реалистична дневна крива на слънчевото греене (irradiance)**
+
+2. **Симулира температурата на модула и околната среда**
+
+3. **Изчислява мощността на инвертора (kW)**
+
+4. **Симулира метеорологични данни**
+
+5. **Създава "виртуално устройство"**
+
+6. **Записва данните в MySQL**
+   - `weather_data` – температура, irradiance, вятър
+   - `telemetry` – параметър "Power" на инвертора
+
+## Seed vs Live симулация
+
+### Seed
+Генерира данни за избрани моменти през деня: `00:00, 01:00, 02:00, ..., 23:00`.
+
+### Live (реално време)
+Генерира нови данни непрекъснато през определен интервал от време - `intervalMs`:
+`t = 0, t = t + 15s, t = 2t + 15s ... t = nt + 15s.`
+
+- Seed данните са полезни за тест на графики и отчети без стартиране на реална симулация.
+- Live симулацията осигурява непрекъснат поток от данни и WebSocket известия.
+
+## Начини за използване
+1. **Създаване на тестов site**
 ```
 INSERT INTO site (name, capacity_kw, timezone)
 VALUES ('Test Site', 5.00, 'Europe/Sofia');
 SELECT * FROM site;
 ```
 
-## След това се пуска сървъра, ако не е пуснат:
+2. **Пускане на сървъра**
+
+Първо преминето в директорията `server`:
+```
+cd src/server
+```
+
+Пуснете сървъра:
 ```
 npm run dev
 ```
 
-## Пуска се симулацията:
-```
-curl -X POST http://localhost:3000/sites/1/simulate/start -H "Content-Type: application/json" -d '{"intervalMs": 3000}'
-```
-### За Windows да се използва curl.exe
+3. **Стартиране на реална (live) симулация**
 
-## В MySQL да се използват следните команди, за да се видят натрупаните данни:
+***За Windows да се използва*** `curl.exe`
 
-### Telemetry:
 ```
-SELECT * 
-FROM telemetry
-ORDER BY timestamp DESC;
+curl -X POST http://localhost:3000/sites/1/simulate/start
 ```
 
-### Weather data:
-```
-SELECT * 
-FROM weather_data
-ORDER BY timestamp DESC;
-```
-
-### Възможно е и с 'curl' да се получат данните:
-```
-curl http://localhost:3000/sites/1/telemetry?limit=50
-```
-
-## Спиране на симулацията:
+4. **Спиране на симулацията**
 ```
 curl -X POST http://localhost:3000/sites/1/simulate/stop
 ```
 
-## За получаване на данни, които да се използват за диаграмите:
+5. **Генериране на seed данни**
 ```
-curl -X POST http://localhost:3000/sites/1/simulate/seed -H "Content-Type: application/json" -d '{"points": 96}'
+curl -X POST http://localhost:3000/sites/1/simulate/seed
 ```
+
+## Преглед на данните
+
+### 1. В `MySQL`
+
+#### Telemetry данни (мощност на инвертора):
+```
+SELECT * FROM telemetry ORDER BY timestamp DESC;
+```
+
+#### Weather data (метеорологични данни):
+```
+SELECT * FROM weather_data ORDER BY timestamp DESC;
+```
+
+### 2. С `curl`
+```
+curl http://localhost:3000/sites/1/telemetry?limit=50
+```
+
+- `limit` – максимален брой извадки
 
 ## Полезни MySQL заявки:
 
@@ -60,7 +95,7 @@ curl -X POST http://localhost:3000/sites/1/simulate/seed -H "Content-Type: appli
 SELECT COUNT(*) FROM telemetry;
 ```
 
-### Power curve over time:
+### Крива на мощността (Power over time):
 ```
 SELECT timestamp, value
 FROM telemetry
@@ -68,7 +103,7 @@ WHERE parameter = 'Power'
 ORDER BY timestamp;
 ```
 
-### Daily energy estimate (kWh)
+### Дневна енергия (Daily energy estimate (kWh)):
 ```
 SELECT 
   DATE(timestamp) AS day,
