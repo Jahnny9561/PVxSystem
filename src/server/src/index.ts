@@ -65,13 +65,17 @@ async function generateTelemetryPointForSite(siteId: number) {
   const capKw = site.capacity_kw ? Number(site.capacity_kw.toString()) : 1.0;
 
   const now = new Date();
-  const hour = now.getHours() + now.getMinutes() / 60;
+  const hour = (now.getHours() % 24) + now.getMinutes() / 60;
   const irradiance = irradianceAtHour(hour);
   const ambient = 20 + 10 * Math.sin((2 * Math.PI / 24) * hour - Math.PI / 2); // 10..30C
   const mtemp = moduleTemp(ambient, irradiance);
 
   const powerKw = computeACPowerKw(capKw, irradiance, -0.004, mtemp, 0.95);
+  const noisyPower = Math.max(0, powerKw + Math.random() * 0.2);
   const device = await ensureSiteDevice(siteId);
+
+  const windSpeed = Math.random() * 10;
+  const windDir = Math.random() * 360;
 
   // write weather_data
   await prisma.weatherData.create({
@@ -81,8 +85,8 @@ async function generateTelemetryPointForSite(siteId: number) {
       irradiance_wm2: toDecimal(+(irradiance.toFixed(2))),
       ambient_temp_c: toDecimal(+(ambient.toFixed(2))),
       module_temp_c: toDecimal(+(mtemp.toFixed(2))),
-      wind_speed_ms: toDecimal(0),
-      wind_dir_deg: toDecimal(0),
+      wind_speed_ms: toDecimal(+(windSpeed.toFixed(2))),
+      wind_dir_deg: toDecimal(+(windDir.toFixed(2))),
     },
   });
 
@@ -93,7 +97,7 @@ async function generateTelemetryPointForSite(siteId: number) {
       device_id: device.device_id,
       timestamp: now,
       parameter: "Power",
-      value: toDecimal(+(powerKw.toFixed(4))),
+      value: toDecimal(+(noisyPower.toFixed(4))),
       unit: "kW",
     },
   });
