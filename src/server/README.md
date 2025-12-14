@@ -1,4 +1,4 @@
-### Симулация на PV данни
+# Симулация на PV данни
 Как да използваме симулацията? Прочетете текста по-долу за отговор на този въпрос.
 
 ## Първо създаваме един тест обект в MySQL, от който да симулираме събиране на данни:
@@ -17,7 +17,7 @@ npm run dev
 ```
 curl -X POST http://localhost:3000/sites/1/simulate/start -H "Content-Type: application/json" -d '{"intervalMs": 3000}'
 ```
-# За Windows да се използва curl.exe
+### За Windows да се използва curl.exe
 
 ## В MySQL използвайте командата, за да видите натрупаните данни:
 ```
@@ -30,7 +30,7 @@ FROM weather_data
 ORDER BY timestamp DESC;
 ```
 
-# Може и с curl да получим данните:
+### Може и с curl да получим данните:
 ```
 curl http://localhost:3000/sites/1/telemetry?limit=50
 ```
@@ -47,12 +47,12 @@ curl -X POST http://localhost:3000/sites/1/simulate/seed -H "Content-Type: appli
 
 ## Полезни MySQL заявки:
 
-# Брой записи:
+### Брой записи:
 ```
 SELECT COUNT(*) FROM telemetry;
 ```
 
-# Power curve over time:
+### Power curve over time:
 ```
 SELECT timestamp, value
 FROM telemetry
@@ -60,7 +60,7 @@ WHERE parameter = 'Power'
 ORDER BY timestamp;
 ```
 
-# Daily energy estimate (kWh)
+### Daily energy estimate (kWh)
 ```
 SELECT 
   DATE(timestamp) AS day,
