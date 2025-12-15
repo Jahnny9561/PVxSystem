@@ -57,6 +57,20 @@ function toDecimal(v: number | string) {
   return new Prisma.Decimal(v);
 }
 
+function broadcastStatus(siteId: number, running: boolean) {
+  const payload = JSON.stringify({
+    type: "STATUS",
+    siteId,
+    running,
+  });
+
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  });
+}
+
 // create a virtual device used for telemetry rows if none present
 async function ensureSiteDevice(siteId: number) {
   // see the Device table: device.type = "SIMULATED_INVERTER"
@@ -211,10 +225,10 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
   }, intervalMs);
 
   simulators.set(siteId, { timer, running: true });
-
+  broadcastStatus(siteId, true);
   res.json({ started: true, siteId, intervalMs });
 });
-          
+
 app.post("/sites/:id/simulate/stop", (req, res) => {
   const siteId = Number(req.params.id);
   const sim = simulators.get(siteId);
@@ -225,7 +239,7 @@ app.post("/sites/:id/simulate/stop", (req, res) => {
 
   clearInterval(sim.timer);
   simulators.delete(siteId);
-
+  broadcastStatus(siteId, false);
   res.json({ stopped: true, siteId });
 });
 
@@ -316,6 +330,12 @@ app.get("/sites/:id/telemetry", async (req, res) => {
       };
     })
   );
+});
+
+app.get("/sites/:id/simulate/status", (req, res) => {
+  const siteId = Number(req.params.id);
+  const isRunning = simulators.has(siteId);
+  res.json({ running: isRunning });
 });
 
 // Delete all simulated data for a site

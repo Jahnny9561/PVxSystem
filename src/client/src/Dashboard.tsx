@@ -140,10 +140,22 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
 
   useEffect(() => {
     fetchHistory();
+
+    axios
+      .get(`${API_URL}/sites/${SITE_ID}/simulate/status`)
+      .then((res) => {
+        setIsSimulating(res.data.running);
+      })
+      .catch((err) => console.error("Failed to check status", err));
+
     ws.current = new WebSocket(WS_URL);
     ws.current.onopen = () => setIsConnected(true);
     ws.current.onmessage = (event) => {
       const payload = JSON.parse(event.data);
+      if (payload.type === "STATUS" && payload.siteId === SITE_ID) {
+        setIsSimulating(payload.running);
+        return;
+      }
       if (payload.siteId === SITE_ID) {
         const newPoint = {
           time: new Date(payload.timestamp).toLocaleTimeString([], {
