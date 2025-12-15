@@ -40,6 +40,7 @@ import FileDownloadIcon from "@mui/icons-material/FileDownload";
 const API_URL = "http://localhost:3000";
 const WS_URL = "ws://localhost:3000";
 const SITE_ID = 1;
+const INTERVAL_MS = 2000;
 
 interface ChartData {
   timestamp: Date;
@@ -204,7 +205,7 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
         setTemp(payload.temp || 0);
 
         setPowerData((prev) => {
-          const next = [...prev, newPoint];
+          const next = [...prev, newPoint].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
           const cutoff = Date.now() - 24 * 60 * 60 * 1000;
           return next.filter((p) => p.timestamp.getTime() >= cutoff);
         });
@@ -233,15 +234,13 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
       await fetchHistory(false); // fetch last 24h data, if available
 
       // Find the latest timestamp
-      const lastTimestamp =
-        powerData.length > 0
-          ? powerData[powerData.length - 1].timestamp
-          : new Date();
+      let lastTimestamp = powerData[powerData.length - 1]?.timestamp || new Date();
+      const newTimestamp = new Date(lastTimestamp.getTime() + INTERVAL_MS);
 
       // Start simulation from the last timestamp
       await axios.post(`${API_URL}/sites/${SITE_ID}/simulate/start`, {
-        intervalMs: 2000,
-        startFrom: lastTimestamp.toISOString(), // pass last timestamp to server
+        intervalMs: INTERVAL_MS,
+        startFrom: newTimestamp.toISOString(), // pass last timestamp to server
       });
 
       setIsSimulating(true);
