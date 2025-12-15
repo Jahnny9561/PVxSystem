@@ -10,7 +10,7 @@
 body {
   margin: 0;
   padding: 0;
-  min-width: 100vw; /* Force full width */
+  min-width: 100%; /* ORIGINAL: '100vw', change back if facing problems :) */
   min-height: 100vh;
 }
 
