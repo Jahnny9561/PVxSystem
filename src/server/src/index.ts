@@ -45,10 +45,14 @@ function computeACPowerKw(
   const gFactor = irradiance / 1000;
   const tempFactor = 1 + tempCoeff * (moduleTempC - 25);
   const p_dc_kw = capacityKw * gFactor * derate * tempFactor;
-  const inverterEff = 0.98;
+  const inverterEff = 0.95 + 0.03 * Math.min(p_dc_kw / capacityKw, 1);
   const p_ac_kw = Math.max(0, p_dc_kw * inverterEff);
   // clip to capacity
-  return Math.min(p_ac_kw, capacityKw);
+  return {
+    ac: Math.min(p_ac_kw, capacityKw),
+    dc: p_dc_kw,
+    efficiency: p_dc_kw > 0 ? (p_ac_kw / p_dc_kw) * 100 : null,
+  };
 }
 
 // utility: convert number -> Prisma.Decimal safely
@@ -92,23 +96,11 @@ function computeSitePhysics(
   timestamp: Date
 ) {
   const capKw = site.capacity_kw ? Number(site.capacity_kw.toString()) : 1.0;
-
   const hour = (timestamp.getHours() % 24) + timestamp.getMinutes() / 60;
-
   const irradiance = irradianceAtHour(hour);
   const ambient = 20 + 10 * Math.sin(((2 * Math.PI) / 24) * hour - Math.PI / 2);
   const moduleTempC = moduleTemp(ambient, irradiance);
-
-  const powerKw = computeACPowerKw(
-    capKw,
-    irradiance,
-    -0.004,
-    moduleTempC,
-    0.95
-  );
-
-  const noisyPowerKw = Math.max(0, powerKw + Math.random() * 0.2);
-
+  const acResult = computeACPowerKw(capKw, irradiance, -0.004, moduleTempC, 0.95);
   const windSpeed = Math.random() * 10;
   const windDir = Math.random() * 360;
 
@@ -117,7 +109,9 @@ function computeSitePhysics(
     irradiance,
     ambient,
     moduleTempC,
-    powerKw: noisyPowerKw,
+    powerKw: acResult.ac + Math.random() * 0.2,
+    dcPowerKw: acResult.dc,
+    inverterEfficiency: acResult.efficiency,
     windSpeed,
     windDir,
   };
@@ -157,6 +151,19 @@ async function generateTelemetryPointForSite(siteId: number) {
       unit: "kW",
     },
   });
+
+  if (physics.inverterEfficiency != null) {
+    await prisma.telemetry.create({
+      data: {
+        device_type: "SIMULATED_INVERTER",
+        device_id: device.device_id,
+        timestamp: now,
+        parameter: "Inverter Efficiency",
+        value: toDecimal(+physics.inverterEfficiency.toFixed(2)),
+        unit: "%",
+      },
+    });
+  }
 
   return { siteId, timestamp: now, ...physics };
 }
@@ -210,8 +217,10 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
         siteId,
         timestamp: p.timestamp,
         powerKw: p.powerKw,
+        dcPowerKw: p.dcPowerKw,
         irradiance: p.irradiance,
         temp: p.moduleTempC,
+        inverterEfficiency: p.inverterEfficiency,
       };
 
       wss.clients.forEach((client) => {
@@ -296,6 +305,19 @@ app.post("/sites/:id/simulate/seed", async (req, res) => {
           unit: "kW",
         },
       });
+
+      if (physics.inverterEfficiency != null) {
+        await prisma.telemetry.create({
+          data: {
+            device_type: "SIMULATED_INVERTER",
+            device_id: device.device_id,
+            timestamp,
+            parameter: "Inverter Efficiency",
+            value: toDecimal(+physics.inverterEfficiency.toFixed(2)),
+            unit: "%",
+          },
+        });
+      }
 
       created.push(t);
     }

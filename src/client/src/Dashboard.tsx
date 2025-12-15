@@ -45,6 +45,7 @@ const INTERVAL_MS = 2000;
 interface ChartData {
   timestamp: Date;
   power: number;
+  inverterEfficiency?: number | null;
 }
 
 interface DashboardProps {
@@ -61,6 +62,7 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
   const [isSimulating, setIsSimulating] = useState(false);
   const [irradiance, setIrradiance] = useState(0);
   const [temp, setTemp] = useState(0);
+  const [inverterEfficiency, setInverterEfficiency] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const ws = useRef<WebSocket | null>(null);
@@ -77,30 +79,42 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
       const res = await axios.get(`${API_URL}/sites/${SITE_ID}/telemetry`, {
         params: { from: from.toISOString(), to: to.toISOString() },
       });
-
-      let history: ChartData[] = (res.data || []).map((d: any) => ({
-        timestamp: new Date(d.timestamp),
-        power: parseFloat(d.value || "0"),
-      }));
-
-      // If empty and allowed, create seed data and fetch again
+      const rows: any[] = res.data || [];
+      const map = new Map<string, { timestamp: string; power?: number; inverterEfficiency?: number }>();
+      rows.forEach((d) => {
+        const tsKey = new Date(d.timestamp).toISOString();
+        if (!map.has(tsKey)) map.set(tsKey, { timestamp: tsKey });
+        const entry = map.get(tsKey)!;
+        if (d.parameter === "Power") {
+          entry.power = Number(d.value || 0);
+        } else if (d.parameter === "Inverter Efficiency") {
+          entry.inverterEfficiency = d.value != null ? Number(d.value) : undefined;
+        }
+      });
+      let history: ChartData[] = Array.from(map.values())
+        .map((e) => ({
+          timestamp: new Date(e.timestamp),
+          power: e.power ?? 0,
+          inverterEfficiency: e.inverterEfficiency ?? null,
+        }))
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       if ((history.length === 0 || history.every((p) => p.power === 0)) && seedIfEmpty) {
         console.info("No seed data found — creating seed (24 points)...");
         try {
-          // create 24 seed points; server endpoint already populates telemetry
           await axios.post(`${API_URL}/sites/${SITE_ID}/simulate/seed`, { points: 24 });
         } catch (e) {
           console.error("Failed to seed telemetry", e);
         }
-        // fetch again, but avoid infinite loop by passing seedIfEmpty = false
         return fetchHistory(false);
       }
-
       setPowerData(history);
       if (history.length > 0) {
-        setCurrentPower(history[history.length - 1].power);
+        const last = history[history.length - 1];
+        setCurrentPower(last.power);
+        setInverterEfficiency(last.inverterEfficiency ?? null);
       } else {
         setCurrentPower(0);
+        setInverterEfficiency(null);
       }
     } catch (err) {
       console.error("Could not fetch history", err);
@@ -199,10 +213,12 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
         const newPoint: ChartData = {
           timestamp: new Date(payload.timestamp),
           power: Number(payload.powerKw),
+          inverterEfficiency: payload.inverterEfficiency != null ? Number(payload.inverterEfficiency) : null,
         };
         setCurrentPower(newPoint.power);
         setIrradiance(payload.irradiance || 0);
         setTemp(payload.temp || 0);
+        setInverterEfficiency(newPoint.inverterEfficiency ?? null);
 
         setPowerData((prev) => {
           const next = [...prev, newPoint].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
@@ -529,12 +545,12 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
                     <ShowChartIcon sx={{ color: "#10b981" }} />
                   </Box>
                   <Box>
-                    <Typography
+                  <Typography
                       variant="h4"
                       fontWeight="bold"
                       color="text.primary"
                     >
-                      98.2%
+                      {inverterEfficiency != null ? inverterEfficiency.toFixed(1) + "%" : "N/A (Night)"}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       Inverter Efficiency
