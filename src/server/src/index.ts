@@ -9,18 +9,17 @@ import { WebSocketServer } from "ws";
 
 dotenv.config();
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+let wss: WebSocketServer;
 
 type Simulator = {
   timer: NodeJS.Timeout;
   running: boolean;
 };
 const simulators = new Map<number, Simulator>();
-
 let shuttingDown = false;
 
 function irradianceAtHour(hour: number, sunrise = 6, sunset = 18, gMax = 900) {
@@ -65,7 +64,7 @@ function broadcastStatus(siteId: number, running: boolean) {
   });
 
   wss.clients.forEach((client) => {
-    if (client.readyState === 1) {
+    if (client.readyState === WebSocket.OPEN) {
       client.send(payload);
     }
   });
@@ -170,6 +169,7 @@ async function shutdown() {
 
   for (const [siteId, sim] of simulators.entries()) {
     clearInterval(sim.timer);
+    broadcastStatus(siteId, false);
     console.log(`Stopped simulation for site ${siteId}`);
   }
   simulators.clear();
@@ -215,7 +215,7 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
       };
 
       wss.clients.forEach((client) => {
-        if (client.readyState === 1) {
+        if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(payload));
         }
       });
@@ -308,27 +308,51 @@ app.post("/sites/:id/simulate/seed", async (req, res) => {
 
 app.get("/sites/:id/telemetry", async (req, res) => {
   const siteId = Number(req.params.id);
-  const limit = Number(req.query.limit ?? 200);
+  if (!Number.isFinite(siteId)) {
+    return res.status(400).json({ error: "Invalid site id" });
+  }
+
   const device = await prisma.device.findFirst({
     where: { name: `sim-site-${siteId}` },
   });
   if (!device) return res.json([]);
+
+  const to = req.query.to
+    ? new Date(req.query.to as string)
+    : new Date();
+
+  const from = req.query.from
+    ? new Date(req.query.from as string)
+    : new Date(to.getTime() - 24 * 60 * 60 * 1000); // last 24h
+
+  if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+    return res.status(400).json({ error: "Invalid date format" });
+  }
+
+  const limit = req.query.limit ? Number(req.query.limit) : undefined;
+
   const data = await prisma.telemetry.findMany({
-    where: { device_id: device.device_id },
-    orderBy: { timestamp: "desc" },
-    take: limit,
+    where: {
+      device_id: device.device_id,
+      timestamp: {
+        gte: from,
+        lte: to,
+      },
+    },
+    orderBy: {
+      timestamp: "asc",
+    },
+    ...(limit ? { take: limit } : {}),
   });
+
   res.json(
-    data.map((d) => {
-      // convert Decimal and BigInt for JSON safety
-      return {
-        telemetry_id: d.telemetry_id.toString(), // BigInt -> string
-        timestamp: d.timestamp,
-        parameter: d.parameter,
-        value: d.value ? d.value.toString() : null,
-        unit: d.unit,
-      };
-    })
+    data.map((d) => ({
+      telemetry_id: d.telemetry_id.toString(),
+      timestamp: d.timestamp,
+      parameter: d.parameter,
+      value: d.value ? d.value.toString() : null,
+      unit: d.unit,
+    }))
   );
 });
 
@@ -376,10 +400,19 @@ const server = app.listen(PORT, () => {
   console.log(`Server ready at http://localhost:${PORT}`);
 });
 
-const wss = new WebSocketServer({ server });
-
+wss = new WebSocketServer({ server });
 wss.on("connection", (ws) => {
   console.log("WS client connected");
+
+  for (const siteId of simulators.keys()) {
+    ws.send(
+      JSON.stringify({
+        type: "STATUS",
+        siteId,
+        running: true,
+      })
+    );
+  }
 });
 
 process.once("SIGINT", shutdown); // Ctrl+C

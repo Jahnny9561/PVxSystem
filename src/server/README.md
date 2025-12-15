@@ -88,7 +88,7 @@ SELECT * FROM weather_data ORDER BY timestamp DESC;
 
 ### 2. С `curl`
 ```
-curl http://localhost:3000/sites/1/telemetry?limit=50
+curl http://localhost:3000/sites/1/telemetry
 ```
 
 - `limit` – максимален брой извадки

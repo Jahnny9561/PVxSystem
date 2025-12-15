@@ -42,7 +42,7 @@ const WS_URL = "ws://localhost:3000";
 const SITE_ID = 1;
 
 interface ChartData {
-  time: string;
+  timestamp: Date;
   power: number;
 }
 
@@ -64,23 +64,43 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
 
   const ws = useRef<WebSocket | null>(null);
 
-  const fetchHistory = async () => {
+  function getLast24hRange() {
+    const to = new Date();
+    const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+    return { from, to };
+  }
+
+  const fetchHistory = async (seedIfEmpty?: boolean) => {
     try {
-      const res = await axios.get(
-        `${API_URL}/sites/${SITE_ID}/telemetry?limit=50`
-      );
-      const history = res.data
-        .map((d: any) => ({
-          time: new Date(d.timestamp).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          power: parseFloat(d.value || "0"),
-        }))
-        .reverse();
+      const { from, to } = getLast24hRange();
+      const res = await axios.get(`${API_URL}/sites/${SITE_ID}/telemetry`, {
+        params: { from: from.toISOString(), to: to.toISOString() },
+      });
+
+      let history: ChartData[] = (res.data || []).map((d: any) => ({
+        timestamp: new Date(d.timestamp),
+        power: parseFloat(d.value || "0"),
+      }));
+
+      // If empty and allowed, create seed data and fetch again
+      if ((history.length === 0 || history.every((p) => p.power === 0)) && seedIfEmpty) {
+        console.info("No seed data found — creating seed (24 points)...");
+        try {
+          // create 24 seed points; server endpoint already populates telemetry
+          await axios.post(`${API_URL}/sites/${SITE_ID}/simulate/seed`, { points: 24 });
+        } catch (e) {
+          console.error("Failed to seed telemetry", e);
+        }
+        // fetch again, but avoid infinite loop by passing seedIfEmpty = false
+        return fetchHistory(false);
+      }
+
       setPowerData(history);
-      if (history.length > 0)
+      if (history.length > 0) {
         setCurrentPower(history[history.length - 1].power);
+      } else {
+        setCurrentPower(0);
+      }
     } catch (err) {
       console.error("Could not fetch history", err);
     }
@@ -88,11 +108,19 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
 
   const handleExport = async () => {
     try {
-      const res = await axios.get(
-        `${API_URL}/sites/${SITE_ID}/telemetry?limit=2000`
-      );
-      const rawData = res.data;
+      const { from, to } = getLast24hRange();
 
+      const res = await axios.get(
+        `${API_URL}/sites/${SITE_ID}/telemetry`,
+        {
+          params: {
+            from: from.toISOString(),
+            to: to.toISOString(),
+          },
+        }
+      );
+
+      const rawData = res.data;
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Solar Data");
 
@@ -139,14 +167,24 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
   };
 
   useEffect(() => {
-    fetchHistory();
+    let mounted = true;
 
     axios
       .get(`${API_URL}/sites/${SITE_ID}/simulate/status`)
       .then((res) => {
-        setIsSimulating(res.data.running);
+        if (!mounted) return;
+        const running = !!res.data.running;
+        setIsSimulating(running);
+        if (!running) {
+          fetchHistory(true);
+        } else {
+          setPowerData([]);
+        }
       })
-      .catch((err) => console.error("Failed to check status", err));
+      .catch((err) => {
+        console.error("Failed to check status", err);
+        fetchHistory(true);
+      });
 
     ws.current = new WebSocket(WS_URL);
     ws.current.onopen = () => setIsConnected(true);
@@ -157,12 +195,8 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
         return;
       }
       if (payload.siteId === SITE_ID) {
-        const newPoint = {
-          time: new Date(payload.timestamp).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
+        const newPoint: ChartData = {
+          timestamp: new Date(payload.timestamp),
           power: Number(payload.powerKw),
         };
         setCurrentPower(newPoint.power);
@@ -170,26 +204,46 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
         setTemp(payload.temp || 0);
 
         setPowerData((prev) => {
-          const newData = [...prev, newPoint];
-          if (newData.length > 50) return newData.slice(newData.length - 50);
-          return newData;
+          const next = [...prev, newPoint];
+          const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+          return next.filter((p) => p.timestamp.getTime() >= cutoff);
         });
       }
     };
     ws.current.onclose = () => setIsConnected(false);
+
     return () => {
+      mounted = false;
       if (ws.current) ws.current.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (isSimulating) {
+      // Do not clear chart, just append live data
+      console.info("Simulation live — keeping previous data");
+    }
+  }, [isSimulating]);
 
   const handleStartSim = async () => {
     if (isLoading || isSimulating) return;
     setIsLoading(true);
 
     try {
+      await fetchHistory(false); // fetch last 24h data, if available
+
+      // Find the latest timestamp
+      const lastTimestamp =
+        powerData.length > 0
+          ? powerData[powerData.length - 1].timestamp
+          : new Date();
+
+      // Start simulation from the last timestamp
       await axios.post(`${API_URL}/sites/${SITE_ID}/simulate/start`, {
         intervalMs: 2000,
+        startFrom: lastTimestamp.toISOString(), // pass last timestamp to server
       });
+
       setIsSimulating(true);
     } catch (e) {
       console.error(e);
@@ -249,15 +303,23 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
             <Typography variant="h4" fontWeight="800" color="text.primary">
               PVxSystem Control Center
             </Typography>
-            <Box
-              sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}
-            >
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
               <Chip
                 size="small"
                 label={isConnected ? "System Online" : "Connecting..."}
                 color={isConnected ? "success" : "default"}
                 variant="filled"
               />
+              
+              {isConnected && (
+                <Chip
+                  size="small"
+                  label={isSimulating ? "Simulation Running" : "Simulation Stopped"}
+                  color={isSimulating ? "primary" : "default"}
+                  variant="outlined"
+                />
+              )}
+
               <Typography variant="caption" color="text.secondary">
                 Site ID: {SITE_ID}
               </Typography>
@@ -502,15 +564,15 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
             <CardContent
               sx={{ flex: 1, display: "flex", flexDirection: "column" }}
             >
-              <Box
-                sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}
-              >
+              <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
                 <Typography variant="h6" fontWeight="bold" color="text.primary">
-                  Real-time Power Output
+                  {isSimulating ? "Real-time Power Output" : "Historical Power Output"}
                 </Typography>
-                <IconButton onClick={fetchHistory} size="small">
-                  <RefreshIcon />
-                </IconButton>
+                {!isSimulating && (
+                  <IconButton onClick={() => fetchHistory()} size="small">
+                    <RefreshIcon />
+                  </IconButton>
+                )}
               </Box>
               <Box sx={{ flexGrow: 1, width: "100%", minHeight: 0 }}>
                 <ResponsiveContainer width="99%" height="100%">
@@ -544,7 +606,13 @@ export default function Dashboard({ toggleTheme, mode }: DashboardProps) {
                       stroke={mode === "dark" ? "#334155" : "#f1f5f9"}
                     />
                     <XAxis
-                      dataKey="time"
+                      dataKey="timestamp"
+                      tickFormatter={(v) =>
+                        new Date(v).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      }
                       tick={{
                         fill: mode === "dark" ? "#94a3b8" : "#64748b",
                         fontSize: 12,
