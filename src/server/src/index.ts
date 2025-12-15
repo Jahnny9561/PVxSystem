@@ -15,7 +15,13 @@ app.use(express.json());
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-const simulators = new Map<number, ReturnType<typeof setInterval>>();
+type Simulator = {
+  timer: NodeJS.Timeout;
+  running: boolean;
+};
+const simulators = new Map<number, Simulator>();
+
+let shuttingDown = false;
 
 function irradianceAtHour(hour: number, sunrise = 6, sunset = 18, gMax = 900) {
   if (hour < sunrise || hour > sunset) return 0;
@@ -142,16 +148,23 @@ async function generateTelemetryPointForSite(siteId: number) {
   return { siteId, timestamp: now, ...physics };
 }
 
-function shutdown() {
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
   console.log("Shutting down...");
-  for (const [siteId, timer] of simulators.entries()) {
-    if (timer) {
-      clearInterval(timer);
-      console.log(`Stopped simulation for site ${siteId}`);
-    }
+
+  for (const [siteId, sim] of simulators.entries()) {
+    clearInterval(sim.timer);
+    console.log(`Stopped simulation for site ${siteId}`);
   }
   simulators.clear();
-  prisma.$disconnect().finally(() => process.exit(0));
+
+  wss.close();
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
 }
 
 // Live simulation for site (writes every intervalMs)
@@ -167,69 +180,50 @@ app.post("/sites/:id/simulate/start", async (req, res) => {
     return res.status(400).json({ error: "Simulation already running" });
   }
 
-  // reserve immediately (race-safe)
-  simulators.set(siteId, null as unknown as ReturnType<typeof setInterval>);
+  const site = await prisma.site.findUnique({
+    where: { site_id: siteId },
+  });
 
-  try {
-    const site = await prisma.site.findUnique({
-      where: { site_id: siteId },
-    });
-
-    if (!site) {
-      simulators.delete(siteId);
-      return res.status(404).json({ error: "Site not found" });
-    }
-
-    const timer = setInterval(async () => {
-      try {
-        const p = await generateTelemetryPointForSite(siteId);
-
-        console.log(
-          "sim:",
-          siteId,
-          p.timestamp.toISOString(),
-          `${p.powerKw.toFixed(3)} kW`
-        );
-
-        const payload = {
-          siteId,
-          timestamp: p.timestamp,
-          powerKw: p.powerKw,
-          irradiance: p.irradiance,
-          temp: p.moduleTempC,
-        };
-
-        wss.clients.forEach((client) => {
-          if (client.readyState === 1) {
-            client.send(JSON.stringify(payload));
-          }
-        });
-      } catch (err) {
-        console.error("sim error:", err);
-      }
-    }, intervalMs);
-
-    simulators.set(siteId, timer);
-    res.json({ started: true, siteId, intervalMs });
-  } catch (err) {
-    simulators.delete(siteId);
-    console.error(err);
-    res.status(500).json({ error: "Failed to start simulation" });
+  if (!site) {
+    return res.status(404).json({ error: "Site not found" });
   }
-});
 
+  const timer = setInterval(async () => {
+    try {
+      const p = await generateTelemetryPointForSite(siteId);
+
+      const payload = {
+        siteId,
+        timestamp: p.timestamp,
+        powerKw: p.powerKw,
+        irradiance: p.irradiance,
+        temp: p.moduleTempC,
+      };
+
+      wss.clients.forEach((client) => {
+        if (client.readyState === 1) {
+          client.send(JSON.stringify(payload));
+        }
+      });
+    } catch (err) {
+      console.error(`sim error (site ${siteId}):`, err);
+    }
+  }, intervalMs);
+
+  simulators.set(siteId, { timer, running: true });
+
+  res.json({ started: true, siteId, intervalMs });
+});
+          
 app.post("/sites/:id/simulate/stop", (req, res) => {
   const siteId = Number(req.params.id);
-  const timer = simulators.get(siteId);
+  const sim = simulators.get(siteId);
 
-  if (!timer) {
-    simulators.delete(siteId);
-    return res
-      .status(404)
-      .json({ error: "No simulation running for this site" });
+  if (!sim) {
+    return res.status(404).json({ error: "No simulation running" });
   }
 
-  clearInterval(timer);
+  clearInterval(sim.timer);
   simulators.delete(siteId);
 
   res.json({ stopped: true, siteId });
@@ -368,5 +362,5 @@ wss.on("connection", (ws) => {
   console.log("WS client connected");
 });
 
-process.on("SIGINT", shutdown); // Ctrl+C
-process.on("SIGTERM", shutdown); // Docker / system stop
+process.once("SIGINT", shutdown); // Ctrl+C
+process.once("SIGTERM", shutdown); // Docker / system stop
