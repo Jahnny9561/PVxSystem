@@ -17,8 +17,10 @@ PVxSystem е информационна система за управление
 ![Снимка на системата в тъмен режим](./docs/images/dark_theme.png)
 
 ## Използвани инструменти и библиотеки
-Front-end файловете са събрани в: `/src/client`
-Back-end файловете са в: `/src/server`
+
+- **Front-end файловете са събрани в: `/src/client`**  
+
+- **Back-end файловете са в: `/src/server`**  
 
 ![Снимка с използваните инструменти и библиотеки](./docs/images/final_dev_stack.png)
 
